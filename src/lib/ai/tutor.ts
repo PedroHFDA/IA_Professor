@@ -18,7 +18,14 @@ if (!apiKey) {
 
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-const MODEL = process.env.GOOGLE_GENERATIVE_AI_MODEL ?? "gemini-2.5-flash";
+// A camada gratuita do Gemini tem oscilado bastante nos últimos dias, com
+// modelos individuais ficando sobrecarregados (erro 503) ou sendo
+// descontinuados para novas contas (erro 404) sem aviso prévio. Por isso,
+// em vez de depender de um único modelo, mantemos uma lista de modelos em
+// ordem de preferência e vamos tentando o próximo se um deles falhar.
+const MODELOS_EM_ORDEM_DE_PREFERENCIA = process.env.GOOGLE_GENERATIVE_AI_MODEL
+  ? [process.env.GOOGLE_GENERATIVE_AI_MODEL]
+  : ["gemini-3.1-flash-lite", "gemini-3.5-flash"];
 
 // Este é o coração do produto: a regra que faz a IA orientar em vez de
 // entregar a resposta pronta. Qualquer ajuste na personalidade do tutor
@@ -71,35 +78,40 @@ export async function getTutorReply(
 Aluno: ${context?.student ?? "aluno"}
 Questao: ${context?.question ?? "questao atual"}
 Tentativas registradas: ${JSON.stringify(context?.attempts ?? [])}
-Instrucao do produto: ${
-    context?.instruction ?? "Oriente com pistas e perguntas, sem entregar a resposta final."
-  }`;
+Instrucao do produto: ${context?.instruction ?? "Oriente com pistas e perguntas, sem entregar a resposta final."
+    }`;
 
-  const transcript = history
-    .map((turn) => `${turn.role === "model" ? "Tutor IA" : "Aluno"}: ${turn.text}`)
-    .join("\n");
+  const contents = history.map((turno) => ({
+    role: turno.role,
+    parts: [{ text: turno.text }],
+  }));
 
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: `${contextText}
+  const systemInstructionCompleta = `${SYSTEM_INSTRUCTION}
+  ${contextText}`;
 
-Conversa ate agora:
-${transcript}
+  let ultimoErro: unknown;
 
-Responda apenas como Tutor IA. Continue a tutoria com uma orientacao curta, sem resolver pelo aluno.`,
-          },
-        ],
-      },
-    ],
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-    },
-  });
+  for (const modelo of MODELOS_EM_ORDEM_DE_PREFERENCIA) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelo,
+        contents,
+        config: {
+          systemInstruction: systemInstructionCompleta,
+        },
+      });
 
-  return response.text ?? "";
+      return response.text ?? "";
+    } catch (err) {
+      ultimoErro = err;
+      const status = (err as { status?: number })?.status;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Falha ao usar o modelo ${modelo} (status ${status}): ${message}`);
+      // status 503 = sobrecarregado, 404 = modelo indisponivel para esta chave,
+      // 429 = limite de uso atingido. Em qualquer um desses casos, vale tentar
+      // o proximo modelo da lista em vez de desistir na hora.
+    }
+  }
+
+  throw ultimoErro;
 }
