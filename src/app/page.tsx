@@ -193,7 +193,16 @@ function loadState(): DemoState {
   if (typeof window === "undefined") return DEFAULT_STATE;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? { ...DEFAULT_STATE, ...JSON.parse(saved) } : DEFAULT_STATE;
+    if (!saved) return DEFAULT_STATE;
+
+    const parsed = { ...DEFAULT_STATE, ...JSON.parse(saved) } as DemoState;
+    return {
+      ...parsed,
+      messages: parsed.messages.filter((message, index, messages) => {
+        const previous = messages[index - 1];
+        return !previous || previous.role !== message.role || previous.text !== message.text;
+      }),
+    };
   } catch {
     return DEFAULT_STATE;
   }
@@ -209,11 +218,12 @@ export default function Home() {
   const [activityTitle, setActivityTitle] = useState("Lista de Equacoes");
   const [answer, setAnswer] = useState("");
   const [imageName, setImageName] = useState("");
-  const [analysisStage, setAnalysisStage] = useState<"idle" | "uploading" | "analyzing" | "done">(
-    "idle"
-  );
+  const [analysisStage, setAnalysisStage] = useState<
+    "idle" | "uploading" | "analyzing" | "done" | "error"
+  >("idle");
   const [chatInput, setChatInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -274,42 +284,88 @@ export default function Home() {
     setView("teacher-activities");
   }
 
+  async function requestTutorReply(history: TutorMessage[], attempts: Attempt[]) {
+    const response = await fetch("/api/tutor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        history,
+        context: {
+          role: "tutor",
+          question: "2x + 5 = 15",
+          student: studentName,
+          attempts,
+          instruction:
+            "A IA deve analisar a tentativa do aluno, identificar lacunas e orientar com pistas ou perguntas, sem entregar a resposta final.",
+        },
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error ?? "Tutor IA indisponivel no momento.");
+    }
+
+    return String(data.reply ?? "").trim();
+  }
+
   async function submitAttempt() {
     if (!answer.trim() && !imageName) return;
+    setAiError(null);
     setAnalysisStage(imageName ? "uploading" : "analyzing");
     await wait(650);
     setAnalysisStage("analyzing");
     await wait(900);
 
     const correct = /x\s*=\s*5\b/i.test(answer);
+    const answerText = answer.trim() || "Resolucao enviada por foto";
     const attempt: Attempt = {
       id: `att-${Date.now()}`,
       number: state.attempts.length + 1,
-      answer: answer.trim() || "Resolucao enviada por foto",
+      answer: answerText,
       imageName: imageName || undefined,
       correct,
       detectedError: correct ? undefined : "Erro no isolamento da variavel",
       knowledgeGap: correct ? undefined : "Operacoes inversas",
-      guidance: correct
-        ? "Boa! Voce chegou a solucao correta."
-        : "Voce encontrou um valor para x, mas vamos revisar seu raciocinio. Qual operacao voce precisa fazer primeiro para eliminar o +5?",
+      guidance: correct ? "Boa! Voce chegou a solucao correta." : "Orientacao pendente do Tutor IA.",
     };
+    const nextAttempts = [...state.attempts, attempt];
+    const nextHistory: TutorMessage[] = [
+      ...state.messages,
+      { role: "user", text: `Minha resolucao: ${answerText}` },
+    ];
 
-    setState((current) => ({
-      ...current,
-      studentStatus: correct ? "Concluida" : "Em andamento",
-      completed: correct,
-      attempts: [...current.attempts, attempt],
-      messages: [
-        ...current.messages,
-        { role: "user", text: attempt.answer },
-        { role: "model", text: attempt.guidance },
-      ],
-    }));
-    setAnalysisStage("done");
-    setAnswer("");
-    setImageName("");
-    setToast(correct ? "Progresso registrado." : "Orientacao disponivel para uma nova tentativa.");
+    try {
+      const reply = await requestTutorReply(nextHistory, nextAttempts);
+      const guidance = reply || attempt.guidance;
+
+      setState((current) => ({
+        ...current,
+        studentStatus: correct ? "Concluida" : "Em andamento",
+        completed: correct,
+        attempts: [...current.attempts, { ...attempt, guidance }],
+        messages: [...nextHistory, { role: "model", text: guidance }],
+      }));
+      setAnalysisStage("done");
+      setAnswer("");
+      setImageName("");
+      setToast(correct ? "Progresso registrado." : "Orientacao disponivel para uma nova tentativa.");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Tutor IA indisponivel no momento. Tente novamente em instantes.";
+
+      setState((current) => ({
+        ...current,
+        studentStatus: "Em andamento",
+        attempts: [...current.attempts, attempt],
+        messages: nextHistory,
+      }));
+      setAiError(message);
+      setAnalysisStage("error");
+      setToast("Tutor IA indisponivel. Sua resolucao foi registrada, mas a orientacao nao foi gerada.");
+    }
   }
 
   async function sendTutorMessage() {
@@ -318,44 +374,21 @@ export default function Home() {
     const nextHistory: TutorMessage[] = [...state.messages, { role: "user", text }];
     setState((current) => ({ ...current, messages: nextHistory }));
     setChatInput("");
+    setAiError(null);
     setAiLoading(true);
 
     try {
-      const response = await fetch("/api/tutor", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          history: nextHistory,
-          context: {
-            role: "tutor",
-            question: "2x + 5 = 15",
-            student: studentName,
-            attempts: state.attempts,
-            instruction:
-              "A IA deve orientar com pistas e perguntas, sem entregar a resposta final.",
-          },
-        }),
-      });
-      if (!response.ok) throw new Error("Falha ao consultar a IA");
-      const data = await response.json();
+      const reply = await requestTutorReply(nextHistory, state.attempts);
       setState((current) => ({
         ...current,
-        messages: [...current.messages, { role: "model", text: data.reply }],
+        messages: [...current.messages, { role: "model", text: reply }],
       }));
-    } catch {
-      setState((current) => ({
-        ...current,
-        messages: [
-          ...current.messages,
-          {
-            role: "model",
-            text:
-              text.toLowerCase().includes("subtrair")
-                ? "Exatamente. Agora faca essa operacao nos dois lados e me diga qual equacao sobra antes de dividir."
-                : "Vamos por partes: para desfazer o +5, qual operacao inversa mantem os dois lados equilibrados?",
-          },
-        ],
-      }));
+    } catch (error) {
+      setAiError(
+        error instanceof Error
+          ? error.message
+          : "Tutor IA indisponivel no momento. Tente novamente em instantes."
+      );
     } finally {
       setAiLoading(false);
     }
@@ -579,6 +612,7 @@ export default function Home() {
                 setChatInput={setChatInput}
                 sendTutorMessage={sendTutorMessage}
                 aiLoading={aiLoading}
+                aiError={aiError}
                 completed={hasCorrectAttempt || state.completed}
                 lastAttempt={lastAttempt}
               />
@@ -974,6 +1008,7 @@ function StudentSolve({
   setChatInput,
   sendTutorMessage,
   aiLoading,
+  aiError,
   completed,
   lastAttempt,
 }: {
@@ -984,12 +1019,13 @@ function StudentSolve({
   setAnswer: (answer: string) => void;
   imageName: string;
   setImageName: (name: string) => void;
-  analysisStage: "idle" | "uploading" | "analyzing" | "done";
+  analysisStage: "idle" | "uploading" | "analyzing" | "done" | "error";
   submitAttempt: () => void;
   chatInput: string;
   setChatInput: (text: string) => void;
   sendTutorMessage: () => void;
   aiLoading: boolean;
+  aiError: string | null;
   completed: boolean;
   lastAttempt: Attempt;
 }) {
@@ -1060,23 +1096,44 @@ function StudentSolve({
                 onChange={(event) => setAnswer(event.target.value)}
                 placeholder={"Exemplo:\n2x + 5 = 15\nx = 10"}
               />
-              <Button onClick={submitAttempt} disabled={analysisStage === "analyzing" || (!answer.trim() && !imageName)}>
+              <Button
+                onClick={submitAttempt}
+                disabled={
+                  analysisStage === "uploading" ||
+                  analysisStage === "analyzing" ||
+                  (!answer.trim() && !imageName)
+                }
+              >
                 <FileText className="size-4" />
-                Enviar resolucao
+                {analysisStage === "analyzing" || analysisStage === "uploading"
+                  ? "Analisando..."
+                  : "Enviar resolucao"}
               </Button>
             </section>
 
             {analysisStage !== "idle" && (
-              <div className="rounded-lg border bg-card p-4">
+              <div
+                className={`rounded-lg border p-4 ${
+                  analysisStage === "error"
+                    ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                    : "bg-card"
+                }`}
+              >
                 <p className="font-medium">
-                  {analysisStage === "done" ? "Analise concluida" : "Analisando sua resolucao..."}
+                  {analysisStage === "done"
+                    ? "Analise concluida"
+                    : analysisStage === "error"
+                      ? "Tutor IA indisponivel"
+                      : "Analisando sua resolucao..."}
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  A IA esta analisando seu raciocinio.
+                  {analysisStage === "error"
+                    ? "Sua resolucao foi registrada, mas a orientacao da IA nao foi gerada agora."
+                    : "A IA esta analisando seu raciocinio."}
                 </p>
                 <div className="mt-4 space-y-2 text-sm">
                   <Step done label="Resolucao recebida" />
-                  <Step done={analysisStage !== "uploading"} label="Interpretando raciocinio" />
+                  <Step done={analysisStage !== "uploading" && analysisStage !== "error"} label="Interpretando raciocinio" />
                   <Step done={analysisStage === "done"} label="Verificando os passos" />
                 </div>
               </div>
@@ -1119,6 +1176,15 @@ function StudentSolve({
                 </div>
               )}
             </div>
+
+            {aiError && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                <p className="font-medium">Tutor IA fora do ar</p>
+                <p className="mt-1">
+                  {aiError}. Verifique a chave da API ou tente novamente em instantes.
+                </p>
+              </div>
+            )}
 
             {lastAttempt && !lastAttempt.correct && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">

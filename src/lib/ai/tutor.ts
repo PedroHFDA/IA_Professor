@@ -5,17 +5,20 @@ import { GoogleGenAI } from "@google/genai";
 // só este arquivo precisa mudar, o resto do app não sabe nem se importa
 // com qual provedor está por trás.
 
-const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+const apiKey =
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
+  process.env.GEMINI_API_KEY ??
+  process.env.GOOGLE_API_KEY;
 
 if (!apiKey) {
   console.warn(
-    "GOOGLE_GENERATIVE_AI_API_KEY nao configurada. Crie um arquivo .env.local com essa variavel."
+    "Chave do Gemini nao configurada. Crie um arquivo .env.local com GOOGLE_GENERATIVE_AI_API_KEY, GEMINI_API_KEY ou GOOGLE_API_KEY."
   );
 }
 
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-const MODEL = "gemini-3.5-flash";
+const MODEL = process.env.GOOGLE_GENERATIVE_AI_MODEL ?? "gemini-2.5-flash";
 
 // Este é o coração do produto: a regra que faz a IA orientar em vez de
 // entregar a resposta pronta. Qualquer ajuste na personalidade do tutor
@@ -61,27 +64,38 @@ export async function getTutorReply(
   context?: TutorContext
 ): Promise<string> {
   if (!ai) {
-    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY nao configurada");
+    throw new Error("Chave do Gemini nao configurada");
   }
 
-  const contextText = context
-    ? `Contexto da tutoria atual:
-Aluno: ${context.student ?? "aluno"}
-Questao: ${context.question ?? "questao atual"}
-Tentativas registradas: ${JSON.stringify(context.attempts ?? [])}
-Instrucao do produto: ${context.instruction ?? "Oriente sem entregar a resposta final."}`
-    : "";
+  const contextText = `Contexto da tutoria atual:
+Aluno: ${context?.student ?? "aluno"}
+Questao: ${context?.question ?? "questao atual"}
+Tentativas registradas: ${JSON.stringify(context?.attempts ?? [])}
+Instrucao do produto: ${
+    context?.instruction ?? "Oriente com pistas e perguntas, sem entregar a resposta final."
+  }`;
 
-  const contents = history.map((turn) => ({
-    role: turn.role,
-    parts: [{ text: turn.text }],
-  }));
+  const transcript = history
+    .map((turn) => `${turn.role === "model" ? "Tutor IA" : "Aluno"}: ${turn.text}`)
+    .join("\n");
 
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: contextText
-      ? [{ role: "user", parts: [{ text: contextText }] }, ...contents]
-      : contents,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `${contextText}
+
+Conversa ate agora:
+${transcript}
+
+Responda apenas como Tutor IA. Continue a tutoria com uma orientacao curta, sem resolver pelo aluno.`,
+          },
+        ],
+      },
+    ],
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
     },

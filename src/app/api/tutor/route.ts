@@ -19,6 +19,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply });
   } catch (err) {
     console.error("Erro na rota /api/tutor:", err);
+    if (err instanceof Error && err.message.includes("Chave do Gemini")) {
+      return NextResponse.json(
+        { error: "chave do Gemini nao configurada no servidor" },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
       { error: "erro ao consultar a IA, tente novamente em instantes" },
       { status: 500 }
