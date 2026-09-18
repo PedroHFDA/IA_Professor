@@ -1,17 +1,32 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Send } from "lucide-react";
+
+import { ThemeToggle } from "../theme-toggle";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 
 type Message = {
   role: "user" | "model";
   text: string;
 };
 
-const EXERCICIO = "2x + 6 = 14";
+const EXERCICIO = "3(2x - 4) + 8 = 2x + 20";
 
 const MENSAGEM_INICIAL: Message = {
   role: "model",
-  text: `Vamos praticar equação do primeiro grau. Resolva: ${EXERCICIO}. Qual você acha que é o primeiro passo pra começar a resolver isso?`,
+  text: `Vamos resolver uma equacao com distributiva e termos dos dois lados: ${EXERCICIO}. Antes de tentar isolar o x, qual e o primeiro passo para lidar com os parenteses?`,
 };
 
 export default function TutorPage() {
@@ -50,86 +65,168 @@ export default function TutorPage() {
       setMessages((atual) => [...atual, { role: "model", text: dados.reply }]);
     } catch {
       setErro(
-        "Não consegui falar com o tutor agora. Confira a chave de IA no arquivo .env.local e tente de novo."
+        "Nao consegui falar com o tutor agora. Confira a chave de IA no arquivo .env.local e tente de novo."
       );
     } finally {
       setCarregando(false);
     }
   }
 
-  function aoPressionarTecla(evento: React.KeyboardEvent<HTMLInputElement>) {
-    if (evento.key === "Enter") {
+  function aoPressionarTecla(evento: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (evento.key === "Enter" && (evento.ctrlKey || evento.metaKey)) {
       enviarMensagem();
     }
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-6 py-4">
-        <h1 className="text-lg font-semibold text-slate-800">
-          Tutor de matemática, versão de demonstração
-        </h1>
-        <p className="text-sm text-slate-500">
-          Exercício de hoje: equação do primeiro grau
-        </p>
-      </header>
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-8">
+        <nav className="flex items-center justify-between gap-4">
+          <Link href="/" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            <ArrowLeft className="size-4" />
+            Inicio
+          </Link>
+          <ThemeToggle />
+        </nav>
 
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 py-6">
-        {messages.map((mensagem, indice) => (
-          <div
-            key={indice}
-            className={`flex ${
-              mensagem.role === "user" ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
-                mensagem.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-white text-slate-800 shadow-sm ring-1 ring-slate-200"
-              }`}
-            >
-              {mensagem.text}
-            </div>
-          </div>
-        ))}
+        <div className="mt-6 grid flex-1 gap-5 lg:grid-cols-[300px_1fr_300px]">
+          <aside className="space-y-4">
+            <Card className="bg-card/80">
+              <CardHeader>
+                <Badge variant="secondary" className="w-fit">
+                  Aluno
+                </Badge>
+                <CardTitle>Atividade assistida</CardTitle>
+                <CardDescription>
+                  Resolva mostrando o raciocinio. A IA vai ajudar com perguntas, nao com a
+                  resposta pronta.
+                </CardDescription>
+              </CardHeader>
+            </Card>
 
-        {carregando && (
-          <div className="flex justify-start">
-            <div className="max-w-[80%] rounded-2xl bg-white px-4 py-2 text-sm text-slate-400 shadow-sm ring-1 ring-slate-200">
-              o tutor está pensando...
-            </div>
-          </div>
-        )}
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle>Questao 1</CardTitle>
+                <CardDescription>Equacao de 1o grau com distributiva.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="rounded-xl border bg-background p-4 font-mono text-2xl font-semibold">
+                  {EXERCICIO}
+                </p>
+                <div className="mt-4 rounded-xl border border-dashed bg-muted/60 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">Exemplo de erro comum</p>
+                  <p className="mt-1 font-mono text-sm">6x - 4 + 8 = 2x + 20</p>
+                </div>
+              </CardContent>
+            </Card>
+          </aside>
 
-        {erro && (
-          <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-600 ring-1 ring-red-200">
-            {erro}
-          </div>
-        )}
+          <Card className="flex min-h-[72vh] bg-card/80">
+            <CardHeader className="border-b">
+              <CardTitle>Conversa com a IA tutora</CardTitle>
+              <CardDescription>
+                Cada resposta deve aproximar o aluno do proximo passo.
+              </CardDescription>
+            </CardHeader>
 
-        <div ref={fimDaConversaRef} />
-      </main>
+            <CardContent className="flex flex-1 flex-col px-0 pb-0">
+              <div className="flex-1 space-y-4 overflow-y-auto bg-background/70 p-4">
+                {messages.map((mensagem, indice) => (
+                  <div
+                    key={indice}
+                    className={`flex ${mensagem.role === "user" ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
+                        mensagem.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "border bg-card text-card-foreground"
+                      }`}
+                    >
+                      {mensagem.text}
+                    </div>
+                  </div>
+                ))}
 
-      <footer className="border-t border-slate-200 bg-white px-4 py-4">
-        <div className="mx-auto flex w-full max-w-2xl gap-2">
-          <input
-            value={input}
-            onChange={(evento) => setInput(evento.target.value)}
-            onKeyDown={aoPressionarTecla}
-            placeholder="Escreva sua resposta ou seu raciocínio aqui"
-            className="flex-1 rounded-xl border border-slate-300 px-4 py-2 text-sm outline-none focus:border-blue-500"
-            disabled={carregando}
-          />
-          <button
-            onClick={enviarMensagem}
-            disabled={carregando || !input.trim()}
-            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
-          >
-            Enviar
-          </button>
+                {carregando && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[86%] rounded-2xl border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm">
+                      A IA esta lendo o raciocinio...
+                    </div>
+                  </div>
+                )}
+
+                {erro && (
+                  <div className="rounded-xl border border-destructive bg-card px-4 py-3 text-sm text-destructive">
+                    {erro}
+                  </div>
+                )}
+
+                <div ref={fimDaConversaRef} />
+              </div>
+
+              <div className="border-t p-4">
+                <Textarea
+                  value={input}
+                  onChange={(evento) => setInput(evento.target.value)}
+                  onKeyDown={aoPressionarTecla}
+                  placeholder="Escreva seu passo a passo. Ex: apliquei a distributiva..."
+                  disabled={carregando}
+                  className="min-h-24 resize-none bg-background"
+                />
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">Use Ctrl + Enter para enviar.</p>
+                  <Button onClick={enviarMensagem} disabled={carregando || !input.trim()}>
+                    <Send className="size-4" />
+                    Enviar
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <aside className="space-y-4">
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle>Analise esperada</CardTitle>
+                <CardDescription>Sinais que a IA deve observar nesta questao.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Badge variant="outline">Distributiva</Badge>
+                <Badge variant="outline">Termos semelhantes</Badge>
+                <Badge variant="outline">Isolamento de x</Badge>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle>Progresso da tentativa</CardTitle>
+                <CardDescription>Exemplo de leitura para a demo.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Progress value={64}>
+                  <ProgressLabel>Distributiva</ProgressLabel>
+                  <ProgressValue />
+                </Progress>
+                <Progress value={46}>
+                  <ProgressLabel>Organizacao dos termos</ProgressLabel>
+                  <ProgressValue />
+                </Progress>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/80">
+              <CardHeader>
+                <CardTitle>Reforco sugerido</CardTitle>
+                <CardDescription>
+                  Uma lista curta de exercicios com parenteses antes de passar para questoes
+                  com fracoes.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </aside>
         </div>
-      </footer>
-    </div>
+      </div>
+    </main>
   );
 }

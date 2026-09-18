@@ -13,7 +13,7 @@ if (!apiKey) {
   );
 }
 
-const ai = new GoogleGenAI({ apiKey });
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const MODEL = "gemini-3.5-flash";
 
@@ -49,7 +49,29 @@ export type ChatTurn = {
   text: string;
 };
 
-export async function getTutorReply(history: ChatTurn[]): Promise<string> {
+export type TutorContext = {
+  question?: string;
+  student?: string;
+  attempts?: unknown[];
+  instruction?: string;
+};
+
+export async function getTutorReply(
+  history: ChatTurn[],
+  context?: TutorContext
+): Promise<string> {
+  if (!ai) {
+    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY nao configurada");
+  }
+
+  const contextText = context
+    ? `Contexto da tutoria atual:
+Aluno: ${context.student ?? "aluno"}
+Questao: ${context.question ?? "questao atual"}
+Tentativas registradas: ${JSON.stringify(context.attempts ?? [])}
+Instrucao do produto: ${context.instruction ?? "Oriente sem entregar a resposta final."}`
+    : "";
+
   const contents = history.map((turn) => ({
     role: turn.role,
     parts: [{ text: turn.text }],
@@ -57,7 +79,9 @@ export async function getTutorReply(history: ChatTurn[]): Promise<string> {
 
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents,
+    contents: contextText
+      ? [{ role: "user", parts: [{ text: contextText }] }, ...contents]
+      : contents,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
     },

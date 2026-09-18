@@ -17,12 +17,28 @@ export const metadata: Metadata = {
   description: "Prototipo de demonstracao, uma IA que orienta o aluno passo a passo em vez de dar a resposta pronta.",
 };
 
+const themeScript = `
+(() => {
+  const key = "ia-professor-theme";
+  const theme = localStorage.getItem(key) || "system";
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const root = document.documentElement;
+  root.classList.remove("light", "dark");
+  if (theme === "light") root.classList.add("light");
+  if (theme === "dark" || (theme === "system" && prefersDark)) root.classList.add("dark");
+})();
+`;
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="pt-BR"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

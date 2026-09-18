@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTutorReply, type ChatTurn } from "@/lib/ai/tutor";
+import { getTutorReply, type ChatTurn, type TutorContext } from "@/lib/ai/tutor";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const history: ChatTurn[] = body.history;
+    const context: TutorContext | undefined = body.context;
 
     if (!Array.isArray(history) || history.length === 0) {
       return NextResponse.json(
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const reply = await getTutorReply(history);
+    const reply = await getTutorReply(history, context);
 
     return NextResponse.json({ reply });
   } catch (err) {
